@@ -13,7 +13,7 @@ import AppError from "../utils/AppError.js";
  */
 export const registerUser = async (name, email, password) => {
   // 1. Validasi email SSO
-  if (!email.endsWith("@sso.kampus.ac.id")) {
+  if (!email.endsWith("@unhas.ac.id")) {
     throw new AppError(
       "Registrasi gagal. Gunakan email SSO (@sso.kampus.ac.id)",
       400

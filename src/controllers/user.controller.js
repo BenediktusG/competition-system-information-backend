@@ -9,16 +9,15 @@ const asyncHandler = (fn) => (req, res, next) => {
 
 export const getAll = asyncHandler(async (req, res) => {
   const users = await userService.getAllUsers();
-  res.status(200).json({
-    status: "success",
-    data: users,
-  });
+
+  // PERBAIKAN: Kembalikan array user langsung
+  res.status(200).json(users);
 });
 
 export const updateRole = asyncHandler(async (req, res) => {
   const { id: userIdToUpdate } = req.params;
   const { role: newRole } = req.body;
-  const currentUserId = req.user.id; // Didapat dari middleware isAuthenticated
+  const currentUserId = req.user.id;
 
   if (!newRole) {
     throw new AppError("Peran baru (role) wajib diisi", 400);
@@ -30,8 +29,6 @@ export const updateRole = asyncHandler(async (req, res) => {
     currentUserId
   );
 
-  res.status(200).json({
-    status: "success",
-    data: updatedUser,
-  });
+  // PERBAIKAN: Kembalikan objek user yang diupdate
+  res.status(200).json(updatedUser);
 });

@@ -4,7 +4,7 @@ info:
   description: |-
     API untuk mengelola Sistem Informasi Lomba Departemen Informatika.
     API ini menangani autentikasi pengguna, manajemen lomba, kategori, dan manajemen peran.
-  version: 1.0.0
+  version: 1.1.0 # Versi diperbarui
 servers:
   - url: /api/v1
     description: Base URL API
@@ -24,7 +24,7 @@ tags:
 
 paths:
   # ---------------------------------------------------------------
-  #  Auth Endpoints
+  #  Auth Endpoints (Tidak Berubah)
   # ---------------------------------------------------------------
   /auth/register:
     post:
@@ -46,17 +46,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/UserResponse"
         "400":
-          description: "Validasi gagal (misal: email tidak valid, password kurang kuat)"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
+          description: Validasi gagal
         "409":
           description: Email sudah terdaftar
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
 
   /auth/login:
     post:
@@ -79,10 +71,6 @@ paths:
                 $ref: "#/components/schemas/UserResponse"
         "401":
           description: Email atau password salah
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
 
   /auth/logout:
     post:
@@ -95,13 +83,7 @@ paths:
       responses:
         "200":
           description: Logout berhasil.
-          content:
-            application/json:
-              schema:
-                properties:
-                  message:
-                    type: string
-                    example: Logout berhasil
+
   /auth/me:
     get:
       tags:
@@ -118,21 +100,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/UserResponse"
         "401":
-          description: Tidak terautentikasi (belum login)
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
+          description: Tidak terautentikasi
 
   # ---------------------------------------------------------------
-  #  Competitions Endpoints
+  #  Competitions Endpoints (BERUBAH)
   # ---------------------------------------------------------------
   /competitions:
     get:
       tags:
         - Competitions
       summary: Mendapatkan semua lomba aktif
-      description: Mendapatkan daftar lomba yang belum diarsip dan belum kadaluarsa. (Untuk semua role)
+      description: Mendapatkan daftar lomba yang belum diarsip dan belum kadaluarsa.
       security:
         - cookieAuth: []
       parameters:
@@ -165,15 +143,72 @@ paths:
       tags:
         - Competitions
       summary: Membuat lomba baru (Admin/Super Admin)
-      description: Menambahkan data lomba baru ke sistem.
+      description: Menambahkan data lomba baru. Menggunakan multipart/form-data untuk upload poster.
       security:
-        - cookieAuth: [] # Peran akan dicek di logic backend
+        - cookieAuth: []
       requestBody:
         required: true
         content:
-          application/json:
+          # --- PERUBAHAN DI SINI ---
+          multipart/form-data:
             schema:
-              $ref: "#/components/schemas/CompetitionRequest"
+              type: object
+              required:
+                - title
+                - shortDescription
+                - fullDescription
+                - organizer
+                - poster # Poster sekarang wajib di sini
+                - registrationStartDate
+                - registrationEndDate
+                - eventDate
+                - registrationLink
+                - contactPerson
+                - categoryId
+              properties:
+                title:
+                  type: string
+                  example: Lomba Gemastik 2026
+                shortDescription:
+                  type: string
+                  example: Ajang kompetisi TIK nasional...
+                fullDescription:
+                  type: string
+                  example: Deskripsi lengkap mengenai lomba...
+                organizer:
+                  type: string
+                  example: Puspresnas
+                poster:
+                  type: string
+                  format: binary # Tipe untuk file upload
+                  description: File poster (JPG/PNG, maks 5MB)
+                registrationStartDate:
+                  type: string
+                  format: date-time
+                  example: "2026-01-01T00:00:00Z"
+                registrationEndDate:
+                  type: string
+                  format: date-time
+                  example: "2026-02-01T23:59:59Z"
+                eventDate:
+                  type: string
+                  format: date-time
+                  example: "2026-03-15T09:00:00Z"
+                registrationLink:
+                  type: string
+                  format: uri
+                  example: https://gemastik.kemdikbud.go.id
+                contactPerson:
+                  type: string
+                  example: "08123456789 (Admin)"
+                registrationFee:
+                  type: string
+                  nullable: true
+                  example: Gratis
+                categoryId:
+                  type: string
+                  example: clm_...
+          # --- AKHIR PERUBAHAN ---
       responses:
         "201":
           description: Lomba berhasil dibuat
@@ -232,7 +267,7 @@ paths:
       tags:
         - Competitions
       summary: Mengedit lomba (Admin/Super Admin)
-      description: Memperbarui data lomba berdasarkan ID.
+      description: Memperbarui data lomba berdasarkan ID. Menggunakan multipart/form-data.
       security:
         - cookieAuth: []
       parameters:
@@ -245,9 +280,55 @@ paths:
       requestBody:
         required: true
         content:
-          application/json:
+          # --- PERUBAHAN DI SINI ---
+          multipart/form-data:
             schema:
-              $ref: "#/components/schemas/CompetitionRequest"
+              type: object
+              # Daftar 'required' tidak mencantumkan 'poster', karena opsional saat update
+              required:
+                - title
+                - shortDescription
+                - fullDescription
+                - organizer
+                - registrationStartDate
+                - registrationEndDate
+                - eventDate
+                - registrationLink
+                - contactPerson
+                - categoryId
+              properties:
+                title:
+                  type: string
+                shortDescription:
+                  type: string
+                fullDescription:
+                  type: string
+                organizer:
+                  type: string
+                poster:
+                  type: string
+                  format: binary
+                  description: Poster baru (Opsional. Kirim hanya jika ingin mengganti file lama).
+                registrationStartDate:
+                  type: string
+                  format: date-time
+                registrationEndDate:
+                  type: string
+                  format: date-time
+                eventDate:
+                  type: string
+                  format: date-time
+                registrationLink:
+                  type: string
+                  format: uri
+                contactPerson:
+                  type: string
+                registrationFee:
+                  type: string
+                  nullable: true
+                categoryId:
+                  type: string
+          # --- AKHIR PERUBAHAN ---
       responses:
         "200":
           description: Lomba berhasil diperbarui
@@ -263,7 +344,7 @@ paths:
       tags:
         - Competitions
       summary: Menghapus lomba (Admin/Super Admin)
-      description: Menghapus data lomba secara permanen berdasarkan ID.
+      description: Menghapus data lomba secara permanen berdasarkan ID. (Termasuk file poster)
       security:
         - cookieAuth: []
       parameters:
@@ -309,7 +390,7 @@ paths:
           description: Lomba tidak ditemukan
 
   # ---------------------------------------------------------------
-  #  Categories Endpoints
+  #  Categories Endpoints (Tidak Berubah)
   # ---------------------------------------------------------------
   /categories:
     get:
@@ -406,7 +487,7 @@ paths:
           description: Kategori tidak ditemukan
 
   # ---------------------------------------------------------------
-  #  User Management Endpoints (Super Admin)
+  #  User Management Endpoints (Tidak Berubah)
   # ---------------------------------------------------------------
   /users:
     get:
@@ -487,7 +568,7 @@ components:
   #  Schemas (Data Models)
   # ---------------------------------------------------------------
   schemas:
-    # --- User Schemas ---
+    # --- User Schemas (Tidak berubah) ---
     UserRegisterRequest:
       type: object
       required: [name, email, password]
@@ -536,13 +617,11 @@ components:
         createdAt:
           type: string
           format: date-time
-          example: "2025-11-16T12:30:00Z"
         updatedAt:
           type: string
           format: date-time
-          example: "2025-11-16T12:30:00Z"
 
-    # --- Category Schemas ---
+    # --- Category Schemas (Tidak berubah) ---
     CategoryRequest:
       type: object
       required: [name]
@@ -560,64 +639,10 @@ components:
           type: string
           example: Competitive Programming
 
-    # --- Competition Schemas ---
-    CompetitionRequest:
-      type: object
-      required:
-        - title
-        - shortDescription
-        - fullDescription
-        - organizer
-        - posterUrl
-        - registrationStartDate
-        - registrationEndDate
-        - eventDate
-        - registrationLink
-        - contactPerson
-        - categoryId
-      properties:
-        title:
-          type: string
-          example: Lomba Gemastik 2026
-        shortDescription:
-          type: string
-          example: Ajang kompetisi TIK nasional...
-        fullDescription:
-          type: string
-          example: Deskripsi lengkap mengenai lomba...
-        organizer:
-          type: string
-          example: Puspresnas
-        posterUrl:
-          type: string
-          format: uri
-          example: https://example.com/poster.jpg
-        registrationStartDate:
-          type: string
-          format: date-time
-          example: "2026-01-01T00:00:00Z"
-        registrationEndDate:
-          type: string
-          format: date-time
-          example: "2026-02-01T23:59:59Z"
-        eventDate:
-          type: string
-          format: date-time
-          example: "2026-03-15T09:00:00Z"
-        registrationLink:
-          type: string
-          format: uri
-          example: https://gemastik.kemdikbud.go.id
-        contactPerson:
-          type: string
-          example: "08123456789 (Admin)"
-        registrationFee:
-          type: string
-          nullable: true
-          example: Gratis
-        categoryId:
-          type: string
-          example: clm_...
+    # --- Competition Schemas (BERUBAH) ---
+
+    # CompetitionRequest: DIHAPUS (diganti dengan inline schema di 'paths')
+
     CompetitionResponse:
       type: object
       properties:
@@ -638,8 +663,11 @@ components:
           example: Puspresnas
         posterUrl:
           type: string
-          format: uri
-          example: https://example.com/poster.jpg
+          # --- PERUBAHAN DI SINI ---
+          format: uri-reference # Lebih akurat untuk relative path
+          description: Relative path ke poster di server
+          example: /uploads/poster-1678886400000.jpg
+          # --- AKHIR PERUBAHAN ---
         registrationStartDate:
           type: string
           format: date-time
@@ -678,7 +706,7 @@ components:
         category:
           $ref: "#/components/schemas/CategoryResponse"
 
-    # --- Generic Error ---
+    # --- Generic Error (Tidak berubah) ---
     ErrorResponse:
       type: object
       properties:

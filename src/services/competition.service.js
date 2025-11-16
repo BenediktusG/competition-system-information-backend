@@ -2,6 +2,8 @@
 
 import prisma from "../config/prisma.js";
 import AppError from "../utils/AppError.js";
+import fs from "fs"; // <-- IMPORT BARU: File System
+import path from "path"; // <-- IMPORT BARU: Path
 
 /**
  * Mendapatkan lomba aktif (belum arsip & belum deadline)
@@ -105,10 +107,43 @@ export const createCompetition = async (data) => {
 };
 
 export const updateCompetition = async (id, data) => {
+  // Cek apakah ada poster baru yang di-upload.
+  // 'data.posterUrl' hanya akan ada jika controller menambahkannya dari req.file.
+  if (data.posterUrl) {
+    try {
+      // 1. Ambil data poster LAMA dari database SEBELUM di-update.
+      const existingCompetition = await prisma.competition.findUnique({
+        where: { id },
+        select: { posterUrl: true }, // Hanya ambil posterUrl
+      });
+
+      // 2. Cek jika poster lama ada
+      if (existingCompetition && existingCompetition.posterUrl) {
+        // 3. Buat file path yang benar
+        //    posterUrl = /uploads/filename.jpg
+        //    path.join('public', ...) = public/uploads/filename.jpg
+        const oldPosterPath = path.join(
+          "public",
+          existingCompetition.posterUrl
+        );
+
+        // 4. Hapus file lama dari file system
+        if (fs.existsSync(oldPosterPath)) {
+          await fs.promises.unlink(oldPosterPath);
+          console.log(`File lama berhasil dihapus: ${oldPosterPath}`);
+        }
+      }
+    } catch (err) {
+      // Log error jika gagal hapus file, tapi jangan hentikan proses update
+      console.warn(`Gagal menghapus file lama untuk lomba ${id}:`, err.message);
+    }
+  }
+
+  // 5. Lanjutkan proses update ke database dengan data baru
   try {
     return await prisma.competition.update({
       where: { id },
-      data,
+      data, // 'data' sudah berisi posterUrl baru (jika ada)
       include: { category: true },
     });
   } catch (error) {
@@ -117,10 +152,27 @@ export const updateCompetition = async (id, data) => {
 };
 
 export const deleteCompetition = async (id) => {
+  // --- PENINGKATAN: Hapus file poster saat lomba dihapus ---
   try {
+    // 1. Ambil data poster LAMA sebelum dihapus
+    const existingCompetition = await prisma.competition.findUnique({
+      where: { id },
+      select: { posterUrl: true },
+    });
+
+    // 2. Hapus data dari database
     await prisma.competition.delete({
       where: { id },
     });
+
+    // 3. Hapus file poster dari file system (setelah DB berhasil)
+    if (existingCompetition && existingCompetition.posterUrl) {
+      const posterPath = path.join("public", existingCompetition.posterUrl);
+      if (fs.existsSync(posterPath)) {
+        await fs.promises.unlink(posterPath);
+        console.log(`Poster lomba ${id} berhasil dihapus: ${posterPath}`);
+      }
+    }
     return;
   } catch (error) {
     throw new AppError("Lomba tidak ditemukan", 404);

@@ -9,7 +9,7 @@ async function main() {
   console.log("Memulai proses seeding...");
 
   // --- Konfigurasi Super Admin ---
-  const superAdminEmail = "superadmin@sso.kampus.ac.id";
+  const superAdminEmail = "superadmin@unhas.ac.id";
   const superAdminName = "Kepala Departemen";
   // Ganti password ini dengan password yang aman
   const superAdminPassword = "superadmin123";

@@ -21,12 +21,14 @@ const PORT = process.env.PORT || 5000;
 // --- Middleware ---
 app.use(
   cors({
-    origin: "http://localhost:3000", // Sesuaikan port frontend Anda
+    origin: "http://localhost:5173", // Sesuaikan port frontend Anda
     credentials: true,
   })
 );
 app.use(cookieParser());
 app.use(express.json());
+
+app.use(express.static("public"));
 
 // --- Routes ---
 const apiBaseUrl = "/api/v1";
