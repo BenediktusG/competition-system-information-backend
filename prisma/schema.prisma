@@ -1,0 +1,62 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Model Pengguna
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String
+  password  String   // Akan di-hash (bcrypt)
+  role      Role     @default(STUDENT)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Enum untuk Roles
+enum Role {
+  STUDENT
+  ADMIN
+  SUPER_ADMIN
+}
+
+// Model Kategori Lomba
+model Category {
+  id           String        @id @default(cuid())
+  name         String        @unique
+  competitions Competition[] // Relasi: Satu Kategori punya banyak Lomba
+}
+
+// Model Lomba
+model Competition {
+  id                  String    @id @default(cuid())
+  title               String    // Judul Lomba
+  shortDescription    String    @db.Text
+  fullDescription     String    @db.Text
+  organizer           String    // Penyelenggara
+  posterUrl           String    // URL ke gambar poster
+  registrationStartDate DateTime  // Tgl Pendaftaran Mulai
+  registrationEndDate DateTime  // Tgl Pendaftaran Selesai (Deadline)
+  eventDate           DateTime  // Tgl Pelaksanaan
+  registrationLink    String    // Link Pendaftaran
+  contactPerson       String    // Narahubung
+  registrationFee     String?   // Biaya Pendaftaran (opsional)
+  isArchived          Boolean   @default(false) // Untuk arsip
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  // Relasi: Satu Lomba punya satu Kategori
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  @@index([categoryId])
+}

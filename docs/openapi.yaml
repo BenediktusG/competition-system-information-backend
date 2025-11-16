@@ -1,0 +1,687 @@
+openapi: 3.0.3
+info:
+  title: Sistem Informasi Lomba API
+  description: |-
+    API untuk mengelola Sistem Informasi Lomba Departemen Informatika.
+    API ini menangani autentikasi pengguna, manajemen lomba, kategori, dan manajemen peran.
+  version: 1.0.0
+servers:
+  - url: /api/v1
+    description: Base URL API
+tags:
+  - name: Auth
+    description: Autentikasi dan Manajemen Sesi Pengguna
+  - name: Competitions
+    description: Manajemen Data Lomba (CRUD)
+  - name: Categories
+    description: Manajemen Kategori Lomba
+  - name: Users
+    description: Manajemen Pengguna (Khusus Super Admin)
+
+# ===============================================================
+#  Paths (Endpoints)
+# ===============================================================
+
+paths:
+  # ---------------------------------------------------------------
+  #  Auth Endpoints
+  # ---------------------------------------------------------------
+  /auth/register:
+    post:
+      tags:
+        - Auth
+      summary: Registrasi pengguna baru (Mahasiswa)
+      description: Membuat akun baru. Validasi email harus `@sso.kampus.ac.id`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserRegisterRequest"
+      responses:
+        "201":
+          description: Pengguna berhasil dibuat.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserResponse"
+        "400":
+          description: "Validasi gagal (misal: email tidak valid, password kurang kuat)"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Email sudah terdaftar
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/login:
+    post:
+      tags:
+        - Auth
+      summary: Login pengguna
+      description: Mengautentikasi pengguna dan mengembalikan cookie httpOnly berisi JWT.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserLoginRequest"
+      responses:
+        "200":
+          description: Login berhasil. Cookie 'token' telah di-set.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserResponse"
+        "401":
+          description: Email atau password salah
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/logout:
+    post:
+      tags:
+        - Auth
+      summary: Logout pengguna
+      description: Menghapus cookie sesi (JWT) dari sisi server.
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Logout berhasil.
+          content:
+            application/json:
+              schema:
+                properties:
+                  message:
+                    type: string
+                    example: Logout berhasil
+  /auth/me:
+    get:
+      tags:
+        - Auth
+      summary: Mendapatkan data pengguna saat ini
+      description: Mengambil data pengguna yang sedang login berdasarkan cookie JWT.
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Data pengguna yang terautentikasi.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserResponse"
+        "401":
+          description: Tidak terautentikasi (belum login)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ---------------------------------------------------------------
+  #  Competitions Endpoints
+  # ---------------------------------------------------------------
+  /competitions:
+    get:
+      tags:
+        - Competitions
+      summary: Mendapatkan semua lomba aktif
+      description: Mendapatkan daftar lomba yang belum diarsip dan belum kadaluarsa. (Untuk semua role)
+      security:
+        - cookieAuth: []
+      parameters:
+        - in: query
+          name: search
+          schema:
+            type: string
+          description: Mencari lomba berdasarkan judul
+        - in: query
+          name: categoryId
+          schema:
+            type: string
+          description: Filter berdasarkan ID kategori
+        - in: query
+          name: sort
+          schema:
+            type: string
+            enum: [deadline_asc, deadline_desc, created_at_desc]
+          description: Mengurutkan hasil
+      responses:
+        "200":
+          description: Daftar lomba aktif
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CompetitionResponse"
+    post:
+      tags:
+        - Competitions
+      summary: Membuat lomba baru (Admin/Super Admin)
+      description: Menambahkan data lomba baru ke sistem.
+      security:
+        - cookieAuth: [] # Peran akan dicek di logic backend
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompetitionRequest"
+      responses:
+        "201":
+          description: Lomba berhasil dibuat
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompetitionResponse"
+        "401":
+          description: Tidak terautentikasi
+        "403":
+          description: Tidak memiliki izin (Bukan Admin/Super Admin)
+
+  /competitions/archived:
+    get:
+      tags:
+        - Competitions
+      summary: Mendapatkan semua lomba yang diarsip
+      description: Mendapatkan daftar lomba yang sudah diarsip atau sudah kadaluarsa.
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Daftar lomba yang diarsip
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CompetitionResponse"
+
+  /competitions/{id}:
+    get:
+      tags:
+        - Competitions
+      summary: Mendapatkan detail satu lomba
+      description: Mengambil detail lengkap satu lomba berdasarkan ID.
+      security:
+        - cookieAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: ID unik lomba (CUID)
+      responses:
+        "200":
+          description: Detail lomba
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompetitionResponse"
+        "404":
+          description: Lomba tidak ditemukan
+    put:
+      tags:
+        - Competitions
+      summary: Mengedit lomba (Admin/Super Admin)
+      description: Memperbarui data lomba berdasarkan ID.
+      security:
+        - cookieAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: ID unik lomba (CUID)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompetitionRequest"
+      responses:
+        "200":
+          description: Lomba berhasil diperbarui
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompetitionResponse"
+        "403":
+          description: Tidak memiliki izin
+        "404":
+          description: Lomba tidak ditemukan
+    delete:
+      tags:
+        - Competitions
+      summary: Menghapus lomba (Admin/Super Admin)
+      description: Menghapus data lomba secara permanen berdasarkan ID.
+      security:
+        - cookieAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: ID unik lomba (CUID)
+      responses:
+        "204":
+          description: Lomba berhasil dihapus (No Content)
+        "403":
+          description: Tidak memiliki izin
+        "404":
+          description: Lomba tidak ditemukan
+
+  /competitions/{id}/archive:
+    post:
+      tags:
+        - Competitions
+      summary: Mengarsipkan lomba (Admin/Super Admin)
+      description: Mengubah status 'isArchived' menjadi true.
+      security:
+        - cookieAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: ID unik lomba (CUID)
+      responses:
+        "200":
+          description: Lomba berhasil diarsipkan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompetitionResponse"
+        "403":
+          description: Tidak memiliki izin
+        "404":
+          description: Lomba tidak ditemukan
+
+  # ---------------------------------------------------------------
+  #  Categories Endpoints
+  # ---------------------------------------------------------------
+  /categories:
+    get:
+      tags:
+        - Categories
+      summary: Mendapatkan semua kategori
+      description: Mengambil daftar semua kategori lomba yang tersedia.
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Daftar kategori
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CategoryResponse"
+    post:
+      tags:
+        - Categories
+      summary: Membuat kategori baru (Admin/Super Admin)
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CategoryRequest"
+      responses:
+        "201":
+          description: Kategori berhasil dibuat
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CategoryResponse"
+        "403":
+          description: Tidak memiliki izin
+        "409":
+          description: Nama kategori sudah ada
+
+  /categories/{id}:
+    put:
+      tags:
+        - Categories
+      summary: Mengedit kategori (Admin/Super Admin)
+      security:
+        - cookieAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: ID unik kategori
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CategoryRequest"
+      responses:
+        "200":
+          description: Kategori berhasil diperbarui
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CategoryResponse"
+        "403":
+          description: Tidak memiliki izin
+        "404":
+          description: Kategori tidak ditemukan
+    delete:
+      tags:
+        - Categories
+      summary: Menghapus kategori (Admin/Super Admin)
+      description: "Menghapus kategori. Lomba yang terkait akan terpengaruh (onDelete: Cascade)."
+      security:
+        - cookieAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: ID unik kategori
+      responses:
+        "204":
+          description: Kategori berhasil dihapus (No Content)
+        "403":
+          description: Tidak memiliki izin
+        "404":
+          description: Kategori tidak ditemukan
+
+  # ---------------------------------------------------------------
+  #  User Management Endpoints (Super Admin)
+  # ---------------------------------------------------------------
+  /users:
+    get:
+      tags:
+        - Users
+      summary: Mendapatkan semua pengguna (Super Admin)
+      description: Mengambil daftar semua pengguna yang terdaftar di sistem.
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Daftar semua pengguna
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/UserResponse"
+        "403":
+          description: Tidak memiliki izin (Bukan Super Admin)
+
+  /users/{id}/role:
+    put:
+      tags:
+        - Users
+      summary: Mengubah peran pengguna (Super Admin)
+      description: Mengubah peran pengguna (misal dari STUDENT ke ADMIN).
+      security:
+        - cookieAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: ID unik pengguna (CUID)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              properties:
+                role:
+                  type: string
+                  enum: [STUDENT, ADMIN]
+                  description: Peran baru untuk pengguna
+              example:
+                role: ADMIN
+      responses:
+        "200":
+          description: Peran pengguna berhasil diperbarui
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserResponse"
+        "400":
+          description: Peran tidak valid
+        "403":
+          description: Tidak memiliki izin (Bukan Super Admin)
+        "404":
+          description: Pengguna tidak ditemukan
+
+# ===============================================================
+#  Components (Reusable Schemas)
+# ===============================================================
+
+components:
+  # ---------------------------------------------------------------
+  #  Security Schemes
+  # ---------------------------------------------------------------
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: token # Nama cookie yang berisi JWT
+
+  # ---------------------------------------------------------------
+  #  Schemas (Data Models)
+  # ---------------------------------------------------------------
+  schemas:
+    # --- User Schemas ---
+    UserRegisterRequest:
+      type: object
+      required: [name, email, password]
+      properties:
+        name:
+          type: string
+          example: Budi Santoso
+        email:
+          type: string
+          format: email
+          example: budi@sso.kampus.ac.id
+        password:
+          type: string
+          format: password
+          minLength: 8
+          example: Rahasia123
+    UserLoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          example: budi@sso.kampus.ac.id
+        password:
+          type: string
+          format: password
+          example: Rahasia123
+    UserResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          example: cklx_...
+        name:
+          type: string
+          example: Budi Santoso
+        email:
+          type: string
+          format: email
+          example: budi@sso.kampus.ac.id
+        role:
+          type: string
+          enum: [STUDENT, ADMIN, SUPER_ADMIN]
+          example: STUDENT
+        createdAt:
+          type: string
+          format: date-time
+          example: "2025-11-16T12:30:00Z"
+        updatedAt:
+          type: string
+          format: date-time
+          example: "2025-11-16T12:30:00Z"
+
+    # --- Category Schemas ---
+    CategoryRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          example: Competitive Programming
+    CategoryResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          example: clm_...
+        name:
+          type: string
+          example: Competitive Programming
+
+    # --- Competition Schemas ---
+    CompetitionRequest:
+      type: object
+      required:
+        - title
+        - shortDescription
+        - fullDescription
+        - organizer
+        - posterUrl
+        - registrationStartDate
+        - registrationEndDate
+        - eventDate
+        - registrationLink
+        - contactPerson
+        - categoryId
+      properties:
+        title:
+          type: string
+          example: Lomba Gemastik 2026
+        shortDescription:
+          type: string
+          example: Ajang kompetisi TIK nasional...
+        fullDescription:
+          type: string
+          example: Deskripsi lengkap mengenai lomba...
+        organizer:
+          type: string
+          example: Puspresnas
+        posterUrl:
+          type: string
+          format: uri
+          example: https://example.com/poster.jpg
+        registrationStartDate:
+          type: string
+          format: date-time
+          example: "2026-01-01T00:00:00Z"
+        registrationEndDate:
+          type: string
+          format: date-time
+          example: "2026-02-01T23:59:59Z"
+        eventDate:
+          type: string
+          format: date-time
+          example: "2026-03-15T09:00:00Z"
+        registrationLink:
+          type: string
+          format: uri
+          example: https://gemastik.kemdikbud.go.id
+        contactPerson:
+          type: string
+          example: "08123456789 (Admin)"
+        registrationFee:
+          type: string
+          nullable: true
+          example: Gratis
+        categoryId:
+          type: string
+          example: clm_...
+    CompetitionResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          example: cln_...
+        title:
+          type: string
+          example: Lomba Gemastik 2026
+        shortDescription:
+          type: string
+          example: Ajang kompetisi TIK nasional...
+        fullDescription:
+          type: string
+          example: Deskripsi lengkap mengenai lomba...
+        organizer:
+          type: string
+          example: Puspresnas
+        posterUrl:
+          type: string
+          format: uri
+          example: https://example.com/poster.jpg
+        registrationStartDate:
+          type: string
+          format: date-time
+          example: "2026-01-01T00:00:00Z"
+        registrationEndDate:
+          type: string
+          format: date-time
+          example: "2026-02-01T23:59:59Z"
+        eventDate:
+          type: string
+          format: date-time
+          example: "2026-03-15T09:00:00Z"
+        registrationLink:
+          type: string
+          format: uri
+          example: https://gemastik.kemdikbud.go.id
+        contactPerson:
+          type: string
+          example: "08123456789 (Admin)"
+        registrationFee:
+          type: string
+          nullable: true
+          example: Gratis
+        isArchived:
+          type: boolean
+          example: false
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        categoryId:
+          type: string
+          example: clm_...
+        category:
+          $ref: "#/components/schemas/CategoryResponse"
+
+    # --- Generic Error ---
+    ErrorResponse:
+      type: object
+      properties:
+        message:
+          type: string
+          example: Terjadi kesalahan

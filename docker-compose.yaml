@@ -1,0 +1,24 @@
+# File: /docker-compose.yml
+# (AMAN - Boleh di-commit ke Git)
+
+version: "3.8"
+
+services:
+  db:
+    image: mysql:8.0
+    container_name: mysql-lomba
+    ports:
+      - 3307:3306
+
+    # KUNCI:
+    # Docker Compose akan mengambil nilai dari file .env
+    # dan memasukkannya ke dalam container saat runtime.
+    env_file:
+      - .env
+
+    volumes:
+      - mysql_data:/var/lib/mysql
+    restart: unless-stopped
+
+volumes:
+  mysql_data:
