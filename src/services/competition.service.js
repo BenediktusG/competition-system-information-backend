@@ -2,94 +2,93 @@
 
 import prisma from "../config/prisma.js";
 import AppError from "../utils/AppError.js";
-import fs from "fs"; // <-- IMPORT BARU: File System
-import path from "path"; // <-- IMPORT BARU: Path
+import fs from "fs";
+import path from "path";
 
 /**
- * Mendapatkan lomba aktif (belum arsip & belum deadline)
- * dengan filter, search, dan sort.
+ * Validasi Logika Tanggal
+ * @param {Date|string} startDate
+ * @param {Date|string} endDate
  */
+const validateDateLogic = (startDate, endDate) => {
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+
+  if (end < start) {
+    throw new AppError(
+      "Tanggal selesai pendaftaran tidak boleh lebih awal dari tanggal mulai.",
+      400
+    );
+  }
+};
+
+/**
+ * Validasi Kategori Ada atau Tidak
+ * @param {string} categoryId
+ */
+const validateCategoryExists = async (categoryId) => {
+  if (!categoryId) return; // Skip jika tidak ada categoryId (untuk update partial)
+
+  const category = await prisma.category.findUnique({
+    where: { id: categoryId },
+  });
+
+  if (!category) {
+    throw new AppError(
+      `Kategori dengan ID ${categoryId} tidak ditemukan.`,
+      400
+    );
+  }
+};
+
+// ========================================================================
+// READ OPERATIONS (Tidak Berubah Signifikan)
+// ========================================================================
+
 export const getActiveCompetitions = async (query) => {
   const { search, categoryId, sort } = query;
   const now = new Date();
 
-  // 1. Tentukan Kondisi WHERE
   let where = {
     isArchived: false,
-    registrationEndDate: {
-      gt: now, // Deadline > waktu sekarang
-    },
+    registrationEndDate: { gt: now },
   };
 
   if (search) {
-    // MySQL defaultnya case-insensitive, tapi ini membuatnya eksplisit
-    where.title = {
-      contains: search,
-      // mode: 'insensitive', // Gunakan jika database Anda case-sensitive
-    };
+    where.title = { contains: search };
   }
 
   if (categoryId) {
     where.categoryId = categoryId;
   }
 
-  // 2. Tentukan Kondisi ORDER BY
-  let orderBy = {
-    createdAt: "desc", // Default sort
-  };
+  let orderBy = { createdAt: "desc" };
 
-  if (sort === "deadline_asc") {
-    orderBy = { registrationEndDate: "asc" };
-  } else if (sort === "deadline_desc") {
-    orderBy = { registrationEndDate: "desc" };
-  }
+  if (sort === "deadline_asc") orderBy = { registrationEndDate: "asc" };
+  else if (sort === "deadline_desc") orderBy = { registrationEndDate: "desc" };
 
   return await prisma.competition.findMany({
     where,
     orderBy,
-    include: {
-      category: {
-        select: { id: true, name: true },
-      },
-    },
+    include: { category: { select: { id: true, name: true } } },
   });
 };
 
-/**
- * Mendapatkan lomba yang diarsip (manual atau otomatis karena deadline)
- */
 export const getArchivedCompetitions = async () => {
   const now = new Date();
   return await prisma.competition.findMany({
     where: {
-      OR: [
-        { isArchived: true },
-        {
-          registrationEndDate: {
-            lte: now, // Deadline <= waktu sekarang
-          },
-        },
-      ],
+      OR: [{ isArchived: true }, { registrationEndDate: { lte: now } }],
     },
-    orderBy: {
-      registrationEndDate: "desc",
-    },
-    include: {
-      category: {
-        select: { id: true, name: true },
-      },
-    },
+    orderBy: { registrationEndDate: "desc" },
+    include: { category: { select: { id: true, name: true } } },
   });
 };
 
 export const getCompetitionById = async (id) => {
   const competition = await prisma.competition.findUnique({
     where: { id },
-    include: {
-      category: {
-        select: { id: true, name: true },
-      },
-    },
+    include: { category: { select: { id: true, name: true } } },
   });
 
   if (!competition) {
@@ -98,95 +97,139 @@ export const getCompetitionById = async (id) => {
   return competition;
 };
 
+// ========================================================================
+// WRITE OPERATIONS (DIPERBAIKI)
+// ========================================================================
+
 export const createCompetition = async (data) => {
-  // Asumsikan validasi data (e.g., date) sudah dilakukan di controller/middleware
-  return await prisma.competition.create({
-    data,
-    include: { category: true },
-  });
-};
+  const {
+    title,
+    registrationStartDate,
+    registrationEndDate,
+    categoryId,
+    posterUrl,
+  } = data;
 
-export const updateCompetition = async (id, data) => {
-  // Cek apakah ada poster baru yang di-upload.
-  // 'data.posterUrl' hanya akan ada jika controller menambahkannya dari req.file.
-  if (data.posterUrl) {
-    try {
-      // 1. Ambil data poster LAMA dari database SEBELUM di-update.
-      const existingCompetition = await prisma.competition.findUnique({
-        where: { id },
-        select: { posterUrl: true }, // Hanya ambil posterUrl
-      });
-
-      // 2. Cek jika poster lama ada
-      if (existingCompetition && existingCompetition.posterUrl) {
-        // 3. Buat file path yang benar
-        //    posterUrl = /uploads/filename.jpg
-        //    path.join('public', ...) = public/uploads/filename.jpg
-        const oldPosterPath = path.join(
-          "public",
-          existingCompetition.posterUrl
-        );
-
-        // 4. Hapus file lama dari file system
-        if (fs.existsSync(oldPosterPath)) {
-          await fs.promises.unlink(oldPosterPath);
-          console.log(`File lama berhasil dihapus: ${oldPosterPath}`);
-        }
-      }
-    } catch (err) {
-      // Log error jika gagal hapus file, tapi jangan hentikan proses update
-      console.warn(`Gagal menghapus file lama untuk lomba ${id}:`, err.message);
-    }
+  // 1. Validasi Field Wajib (Basic)
+  // Poster wajib ada saat create
+  if (
+    !title ||
+    !registrationStartDate ||
+    !registrationEndDate ||
+    !categoryId ||
+    !posterUrl
+  ) {
+    throw new AppError(
+      "Data tidak lengkap. Pastikan judul, tanggal, kategori, dan poster diisi.",
+      400
+    );
   }
 
-  // 5. Lanjutkan proses update ke database dengan data baru
+  // 2. Validasi Foreign Key (Category)
+  await validateCategoryExists(categoryId);
+
+  // 3. Validasi Logika Tanggal
+  validateDateLogic(registrationStartDate, registrationEndDate);
+
+  // 4. Create Database
   try {
-    return await prisma.competition.update({
-      where: { id },
-      data, // 'data' sudah berisi posterUrl baru (jika ada)
+    return await prisma.competition.create({
+      data,
       include: { category: true },
     });
   } catch (error) {
+    // Jaga-jaga jika ada constraint lain
+    throw new AppError("Gagal membuat lomba: " + error.message, 500);
+  }
+};
+
+export const updateCompetition = async (id, data) => {
+  // 1. Ambil data eksisting terlebih dahulu
+  // Ini PENTING untuk:
+  // a. Validasi tanggal (kita butuh tanggal lama jika user hanya update salah satu tanggal)
+  // b. Menghapus poster lama
+  const existingCompetition = await prisma.competition.findUnique({
+    where: { id },
+  });
+
+  if (!existingCompetition) {
     throw new AppError("Lomba tidak ditemukan", 404);
+  }
+
+  // 2. Validasi Kategori (Jika user mengubah kategori)
+  if (data.categoryId) {
+    await validateCategoryExists(data.categoryId);
+  }
+
+  // 3. Validasi Logika Tanggal (Kompleksitas Partial Update)
+  // Gunakan tanggal baru jika ada, jika tidak pakai tanggal lama
+  const newStartDate =
+    data.registrationStartDate || existingCompetition.registrationStartDate;
+  const newEndDate =
+    data.registrationEndDate || existingCompetition.registrationEndDate;
+
+  validateDateLogic(newStartDate, newEndDate);
+
+  // 4. Handle Poster Update
+  if (data.posterUrl && existingCompetition.posterUrl) {
+    try {
+      const oldPosterPath = path.join("public", existingCompetition.posterUrl);
+      if (fs.existsSync(oldPosterPath)) {
+        await fs.promises.unlink(oldPosterPath);
+      }
+    } catch (err) {
+      console.warn(`Gagal menghapus poster lama lomba ${id}:`, err.message);
+    }
+  }
+
+  // 5. Update Database
+  try {
+    return await prisma.competition.update({
+      where: { id },
+      data,
+      include: { category: true },
+    });
+  } catch (error) {
+    throw new AppError("Gagal mengupdate lomba: " + error.message, 500);
   }
 };
 
 export const deleteCompetition = async (id) => {
-  // --- PENINGKATAN: Hapus file poster saat lomba dihapus ---
+  // 1. Cek keberadaan data
+  const existingCompetition = await prisma.competition.findUnique({
+    where: { id },
+    select: { posterUrl: true },
+  });
+
+  if (!existingCompetition) {
+    throw new AppError("Lomba tidak ditemukan", 404);
+  }
+
   try {
-    // 1. Ambil data poster LAMA sebelum dihapus
-    const existingCompetition = await prisma.competition.findUnique({
-      where: { id },
-      select: { posterUrl: true },
-    });
+    // 2. Hapus data dari database DULU (Transaction safe)
+    await prisma.competition.delete({ where: { id } });
 
-    // 2. Hapus data dari database
-    await prisma.competition.delete({
-      where: { id },
-    });
-
-    // 3. Hapus file poster dari file system (setelah DB berhasil)
-    if (existingCompetition && existingCompetition.posterUrl) {
+    // 3. Hapus file poster
+    if (existingCompetition.posterUrl) {
       const posterPath = path.join("public", existingCompetition.posterUrl);
       if (fs.existsSync(posterPath)) {
         await fs.promises.unlink(posterPath);
-        console.log(`Poster lomba ${id} berhasil dihapus: ${posterPath}`);
       }
     }
     return;
   } catch (error) {
-    throw new AppError("Lomba tidak ditemukan", 404);
+    throw new AppError("Gagal menghapus lomba", 500);
   }
 };
 
 export const archiveCompetition = async (id) => {
-  try {
-    return await prisma.competition.update({
-      where: { id },
-      data: { isArchived: true }, // Set manual arsip
-      include: { category: true },
-    });
-  } catch (error) {
-    throw new AppError("Lomba tidak ditemukan", 404);
-  }
+  // Cek dulu apakah ID valid agar errornya 404 bukan 500/P2025
+  const exists = await prisma.competition.count({ where: { id } });
+  if (!exists) throw new AppError("Lomba tidak ditemukan", 404);
+
+  return await prisma.competition.update({
+    where: { id },
+    data: { isArchived: true },
+    include: { category: true },
+  });
 };
