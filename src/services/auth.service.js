@@ -10,8 +10,7 @@ import AppError from "../utils/AppError.js";
  * @param {string} password - Password pengguna
  */
 export const registerUser = async (name, email, password) => {
-  // --- 1. Validasi Kekuatan Password ---
-  // Aturan: Minimal 8 karakter.
+  // 1. Validasi Kekuatan Password
   if (!password || password.length < 8) {
     throw new AppError(
       "Password terlalu lemah. Minimal harus 8 karakter.",
@@ -19,45 +18,46 @@ export const registerUser = async (name, email, password) => {
     );
   }
 
-  // --- 2. Validasi Email Strict (Regex) ---
-  // Penjelasan Regex: /^[^\s@]+@unhas\.ac\.id$/
-  // ^          : Mulai dari awal string (mencegah karakter sampah di depan)
-  // [^\s@]+    : Karakter apapun KECUALI spasi atau '@' (mencegah double @)
-  // @unhas\.ac\.id : Harus persis diikuti domain ini
-  // $          : Akhir string (mencegah karakter tambahan di belakang)
+  // --- 2. Validasi Email Strict (Update Support 2 Domain) ---
+  // Penjelasan Regex: /^[^\s@]+@(student\.)?unhas\.ac\.id$/
+  // ^           : Awal string
+  // [^\s@]+     : Username (karakter apa saja kecuali spasi/@)
+  // @           : Simbol @
+  // (student\.)?: Opsi Group. Boleh ada teks "student." boleh juga TIDAK ada.
+  // unhas\.ac\.id : Harus diakhiri domain utama ini.
+  // $           : Akhir string
 
-  const emailRegex = /^[^\s@]+@unhas\.ac\.id$/;
+  const emailRegex = /^[^\s@]+@(student\.)?unhas\.ac\.id$/;
 
   if (!emailRegex.test(email)) {
     throw new AppError(
-      "Registrasi gagal. Gunakan email resmi kampus (@unhas.ac.id) yang valid.",
+      "Registrasi gagal. Gunakan email resmi (@unhas.ac.id atau @student.unhas.ac.id).",
       400
     );
   }
 
-  // 3. Cek jika email sudah ada (Duplikasi)
+  // 3. Cek jika email sudah ada
   const existingUser = await prisma.user.findUnique({
     where: { email },
   });
 
   if (existingUser) {
-    throw new AppError("Email ini sudah terdaftar", 409); // 409 Conflict
+    throw new AppError("Email ini sudah terdaftar", 409);
   }
 
   // 4. Hash password
   const hashedPassword = await bcrypt.hash(password, 12);
 
-  // 5. Simpan pengguna ke database
+  // 5. Simpan pengguna
   const user = await prisma.user.create({
     data: {
       name,
       email,
       password: hashedPassword,
-      role: "STUDENT", // Default role
+      role: "STUDENT",
     },
   });
 
-  // 6. Hapus password dari objek sebelum dikirim kembali
   delete user.password;
   return user;
 };
