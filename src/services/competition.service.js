@@ -27,7 +27,7 @@ const validateDateLogic = (startDate, endDate) => {
  * @param {string} categoryId
  */
 const validateCategoryExists = async (categoryId) => {
-  if (!categoryId) return; // Skip jika tidak ada categoryId (untuk update partial)
+  if (!categoryId) return;
 
   const category = await prisma.category.findUnique({
     where: { id: categoryId },
@@ -42,15 +42,18 @@ const validateCategoryExists = async (categoryId) => {
 };
 
 // ========================================================================
-// READ OPERATIONS (Tidak Berubah Signifikan)
+// READ OPERATIONS
 // ========================================================================
 
 export const getActiveCompetitions = async (query) => {
   const { search, categoryId, sort } = query;
   const now = new Date();
 
+  // [UBAH] Tambahkan filter status: 'ACCEPTED'
+  // Hanya lomba yang sudah disetujui yang boleh tampil di halaman publik
   let where = {
     isArchived: false,
+    status: "ACCEPTED",
     registrationEndDate: { gt: now },
   };
 
@@ -74,11 +77,32 @@ export const getActiveCompetitions = async (query) => {
   });
 };
 
+// [BARU] Mengambil daftar lomba yang statusnya PENDING (untuk Admin)
+export const getPendingCompetitions = async () => {
+  return await prisma.competition.findMany({
+    where: {
+      status: "PENDING",
+      isArchived: false,
+    },
+    orderBy: { createdAt: "desc" }, // Yang baru diajukan paling atas
+    include: {
+      category: { select: { id: true, name: true } },
+      author: {
+        // Sertakan info siapa yang mengajukan
+        select: { name: true, email: true },
+      },
+    },
+  });
+};
+
 export const getArchivedCompetitions = async () => {
   const now = new Date();
   return await prisma.competition.findMany({
     where: {
       OR: [{ isArchived: true }, { registrationEndDate: { lte: now } }],
+      // Opsional: Apakah arsip juga harus yang ACCEPTED?
+      // Biasanya ya, kecuali admin ingin melihat arsip yang rejected.
+      // Untuk saat ini kita biarkan terbuka agar admin bisa lihat history.
     },
     orderBy: { registrationEndDate: "desc" },
     include: { category: { select: { id: true, name: true } } },
@@ -88,7 +112,10 @@ export const getArchivedCompetitions = async () => {
 export const getCompetitionById = async (id) => {
   const competition = await prisma.competition.findUnique({
     where: { id },
-    include: { category: { select: { id: true, name: true } } },
+    include: {
+      category: { select: { id: true, name: true } },
+      author: { select: { name: true, email: true } }, // Tampilkan pengaju di detail
+    },
   });
 
   if (!competition) {
@@ -98,20 +125,21 @@ export const getCompetitionById = async (id) => {
 };
 
 // ========================================================================
-// WRITE OPERATIONS (DIPERBAIKI)
+// WRITE OPERATIONS
 // ========================================================================
 
-export const createCompetition = async (data) => {
+// [UBAH] Menambahkan parameter 'user' untuk pengecekan role & author
+export const createCompetition = async (data, user) => {
   const {
     title,
     registrationStartDate,
     registrationEndDate,
     categoryId,
     posterUrl,
+    // Field lain spread via ...data di prisma create
   } = data;
 
-  // 1. Validasi Field Wajib (Basic)
-  // Poster wajib ada saat create
+  // 1. Validasi Field Wajib
   if (
     !title ||
     !registrationStartDate ||
@@ -125,29 +153,68 @@ export const createCompetition = async (data) => {
     );
   }
 
-  // 2. Validasi Foreign Key (Category)
+  // 2. Validasi Foreign Key
   await validateCategoryExists(categoryId);
 
   // 3. Validasi Logika Tanggal
   validateDateLogic(registrationStartDate, registrationEndDate);
 
-  // 4. Create Database
+  // 4. [BARU] Tentukan Status Awal & Author
+  // Jika Admin/SuperAdmin -> ACCEPTED
+  // Jika Student -> PENDING
+  const initialStatus = ["ADMIN", "SUPER_ADMIN"].includes(user.role)
+    ? "ACCEPTED"
+    : "PENDING";
+
+  // 5. Create Database
   try {
-    return await prisma.competition.create({
-      data,
+    const newCompetition = await prisma.competition.create({
+      data: {
+        ...data, // Spread data input (pastikan controller sudah membersihkan input)
+        registrationStartDate: new Date(registrationStartDate),
+        registrationEndDate: new Date(registrationEndDate),
+        // [BARU] Insert field baru
+        status: initialStatus,
+        authorId: user.id,
+      },
       include: { category: true },
     });
+
+    // Return object tambahan agar controller tahu statusnya
+    return {
+      ...newCompetition,
+      _initialStatus: initialStatus, // Helper property untuk response message di controller
+    };
   } catch (error) {
-    // Jaga-jaga jika ada constraint lain
     throw new AppError("Gagal membuat lomba: " + error.message, 500);
   }
 };
 
+// [BARU] Update Status Lomba (Moderasi Admin)
+export const updateCompetitionStatus = async (id, newStatus) => {
+  // Validasi input status
+  if (!["ACCEPTED", "REJECTED"].includes(newStatus)) {
+    throw new AppError(
+      "Status tidak valid. Gunakan ACCEPTED atau REJECTED.",
+      400
+    );
+  }
+
+  try {
+    return await prisma.competition.update({
+      where: { id },
+      data: { status: newStatus },
+    });
+  } catch (error) {
+    if (error.code === "P2025") {
+      throw new AppError("Lomba tidak ditemukan", 404);
+    }
+    throw new AppError("Gagal mengubah status lomba", 500);
+  }
+};
+
 export const updateCompetition = async (id, data) => {
-  // 1. Ambil data eksisting terlebih dahulu
-  // Ini PENTING untuk:
-  // a. Validasi tanggal (kita butuh tanggal lama jika user hanya update salah satu tanggal)
-  // b. Menghapus poster lama
+  // 1. Ambil data eksisting
   const existingCompetition = await prisma.competition.findUnique({
     where: { id },
   });
@@ -156,13 +223,12 @@ export const updateCompetition = async (id, data) => {
     throw new AppError("Lomba tidak ditemukan", 404);
   }
 
-  // 2. Validasi Kategori (Jika user mengubah kategori)
+  // 2. Validasi Kategori
   if (data.categoryId) {
     await validateCategoryExists(data.categoryId);
   }
 
-  // 3. Validasi Logika Tanggal (Kompleksitas Partial Update)
-  // Gunakan tanggal baru jika ada, jika tidak pakai tanggal lama
+  // 3. Validasi Logika Tanggal
   const newStartDate =
     data.registrationStartDate || existingCompetition.registrationStartDate;
   const newEndDate =
@@ -186,7 +252,17 @@ export const updateCompetition = async (id, data) => {
   try {
     return await prisma.competition.update({
       where: { id },
-      data,
+      data: {
+        ...data,
+        // Pastikan tanggal dikonversi ke object Date jika di-update
+        ...(data.registrationStartDate && {
+          registrationStartDate: new Date(data.registrationStartDate),
+        }),
+        ...(data.registrationEndDate && {
+          registrationEndDate: new Date(data.registrationEndDate),
+        }),
+        ...(data.eventDate && { eventDate: new Date(data.eventDate) }),
+      },
       include: { category: true },
     });
   } catch (error) {
@@ -195,7 +271,6 @@ export const updateCompetition = async (id, data) => {
 };
 
 export const deleteCompetition = async (id) => {
-  // 1. Cek keberadaan data
   const existingCompetition = await prisma.competition.findUnique({
     where: { id },
     select: { posterUrl: true },
@@ -206,10 +281,8 @@ export const deleteCompetition = async (id) => {
   }
 
   try {
-    // 2. Hapus data dari database DULU (Transaction safe)
     await prisma.competition.delete({ where: { id } });
 
-    // 3. Hapus file poster
     if (existingCompetition.posterUrl) {
       const posterPath = path.join("public", existingCompetition.posterUrl);
       if (fs.existsSync(posterPath)) {
@@ -223,7 +296,6 @@ export const deleteCompetition = async (id) => {
 };
 
 export const archiveCompetition = async (id) => {
-  // Cek dulu apakah ID valid agar errornya 404 bukan 500/P2025
   const exists = await prisma.competition.count({ where: { id } });
   if (!exists) throw new AppError("Lomba tidak ditemukan", 404);
 

@@ -1,8 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
 datasource db {
   provider = "mysql"
   url      = env("DATABASE_URL")
@@ -12,51 +7,82 @@ generator client {
   provider = "prisma-client-js"
 }
 
+// --------------------------------------
 // Model Pengguna
+// --------------------------------------
 model User {
   id        String   @id @default(cuid())
   email     String   @unique
   name      String
-  password  String   // Akan di-hash (bcrypt)
+  password  String
   role      Role     @default(STUDENT)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  // [BARU] Relasi: User (Mahasiswa/Admin) bisa mengajukan banyak lomba
+  submittedCompetitions Competition[]
 }
 
-// Enum untuk Roles
 enum Role {
   STUDENT
   ADMIN
   SUPER_ADMIN
 }
 
-// Model Kategori Lomba
+// --------------------------------------
+// Model Kategori
+// --------------------------------------
 model Category {
   id           String        @id @default(cuid())
   name         String        @unique
-  competitions Competition[] // Relasi: Satu Kategori punya banyak Lomba
+  competitions Competition[]
 }
 
+// --------------------------------------
+// [BARU] Enum Status Kompetisi
+// --------------------------------------
+enum CompetitionStatus {
+  PENDING   // Menunggu persetujuan admin
+  ACCEPTED  // Disetujui (Tayang)
+  REJECTED  // Ditolak
+}
+
+// --------------------------------------
 // Model Lomba
+// --------------------------------------
 model Competition {
   id                  String    @id @default(cuid())
-  title               String    // Judul Lomba
+  title               String
   shortDescription    String    @db.Text
   fullDescription     String    @db.Text
-  organizer           String    // Penyelenggara
-  posterUrl           String    // URL ke gambar poster
-  registrationStartDate DateTime  // Tgl Pendaftaran Mulai
-  registrationEndDate DateTime  // Tgl Pendaftaran Selesai (Deadline)
-  eventDate           DateTime  // Tgl Pelaksanaan
-  registrationLink    String    // Link Pendaftaran
-  contactPerson       String    // Narahubung
-  registrationFee     String?   // Biaya Pendaftaran (opsional)
-  isArchived          Boolean   @default(false) // Untuk arsip
+  organizer           String
+  posterUrl           String
+  registrationStartDate DateTime
+  registrationEndDate DateTime
+  eventDate           DateTime
+  registrationLink    String
+  contactPerson       String
+  registrationFee     String?
+  
+  // Field lama untuk arsip (tetap dipertahankan untuk logika waktu)
+  isArchived          Boolean   @default(false)
+
+  // [BARU] Field Status Moderasi
+  // Default 'PENDING' agar aman. Nanti controller Admin akan override jadi 'ACCEPTED' saat create.
+  status              CompetitionStatus @default(PENDING)
+
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
-  // Relasi: Satu Lomba punya satu Kategori
+  // Relasi Kategori
   categoryId String
   category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  // [BARU] Relasi Penulis/Pengaju (Author)
+  // Dibuat nullable (String?) agar data lama yang belum punya author tidak error saat migrasi.
+  authorId   String?
+  author     User?    @relation(fields: [authorId], references: [id], onDelete: SetNull)
+
   @@index([categoryId])
+  @@index([authorId]) // [BARU] Index untuk performa query by user
 }

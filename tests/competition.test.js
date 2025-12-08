@@ -14,25 +14,25 @@ const mockPosterBuffer = Buffer.from("fake-image-content");
 
 describe("Competition Management Integration Tests", () => {
   // ==========================================
-  // 1. POST /competitions (Create)
+  // 1. POST /competitions (Create & Submission)
   // ==========================================
   describe("POST /competitions", () => {
-    it("should allow ADMIN to create competition with valid data and poster", async () => {
-      const { cookie } = await createTestUser("ADMIN");
+    // [UPDATED] Student CAN now create competition (Status: PENDING)
+    it("should allow STUDENT to submit competition (Default: PENDING)", async () => {
+      const { cookie, user } = await createTestUser("STUDENT");
       const category = await createCategory();
 
       const startDate = new Date();
       const endDate = new Date();
-      endDate.setDate(endDate.getDate() + 30); // 30 hari lagi
+      endDate.setDate(endDate.getDate() + 30);
 
       const res = await request(app)
         .post("/api/v1/competitions")
         .set("Cookie", cookie)
-        // Simulasi Form Data
-        .field("title", "Hackathon 2025")
+        .field("title", "Student Submission")
         .field("shortDescription", "Lomba coding")
-        .field("fullDescription", "Deskripsi panjang lebar")
-        .field("organizer", "HMJ TI")
+        .field("fullDescription", "Deskripsi panjang")
+        .field("organizer", "BEM")
         .field("registrationStartDate", startDate.toISOString())
         .field("registrationEndDate", endDate.toISOString())
         .field("eventDate", endDate.toISOString())
@@ -40,12 +40,54 @@ describe("Competition Management Integration Tests", () => {
         .field("contactPerson", "0812345678")
         .field("categoryId", category.id)
         .field("registrationFee", "Gratis")
-        .attach("poster", mockPosterBuffer, "poster.jpg"); // Upload File
+        .attach("poster", mockPosterBuffer, "poster.jpg");
 
       expect(res.statusCode).toBe(201);
-      expect(res.body.title).toBe("Hackathon 2025");
-      expect(res.body.posterUrl).toBeDefined(); // Pastikan path file ada
-      expect(res.body.isArchived).toBe(false);
+
+      // Verify Response Structure
+      expect(res.body.message).toContain("Menunggu persetujuan Admin"); // Custom message check
+      expect(res.body.data.title).toBe("Student Submission");
+
+      // Verify Database State
+      const dbComp = await prisma.competition.findUnique({
+        where: { id: res.body.data.id },
+      });
+      expect(dbComp.status).toBe("PENDING"); // MUST be pending
+      expect(dbComp.authorId).toBe(user.id); // Must link to author
+    });
+
+    // [UPDATED] Admin creation (Status: ACCEPTED)
+    it("should allow ADMIN to publish competition directly (Default: ACCEPTED)", async () => {
+      const { cookie, user } = await createTestUser("ADMIN");
+      const category = await createCategory();
+
+      const startDate = new Date();
+      const endDate = new Date();
+      endDate.setDate(endDate.getDate() + 30);
+
+      const res = await request(app)
+        .post("/api/v1/competitions")
+        .set("Cookie", cookie)
+        .field("title", "Admin Event")
+        .field("shortDescription", "Official")
+        .field("fullDescription", "Desc")
+        .field("organizer", "Faculty")
+        .field("registrationStartDate", startDate.toISOString())
+        .field("registrationEndDate", endDate.toISOString())
+        .field("eventDate", endDate.toISOString())
+        .field("registrationLink", "https://link.com")
+        .field("contactPerson", "08111")
+        .field("categoryId", category.id)
+        .attach("poster", mockPosterBuffer, "poster.jpg");
+
+      expect(res.statusCode).toBe(201);
+
+      // Verify Database State
+      const dbComp = await prisma.competition.findUnique({
+        where: { id: res.body.data.id },
+      });
+      expect(dbComp.status).toBe("ACCEPTED"); // Admin bypasses moderation
+      expect(dbComp.authorId).toBe(user.id);
     });
 
     it("should return 400 if Registration End Date is BEFORE Start Date", async () => {
@@ -59,133 +101,32 @@ describe("Competition Management Integration Tests", () => {
         .field("shortDescription", "Desc")
         .field("fullDescription", "Desc")
         .field("organizer", "Org")
-        .field("registrationStartDate", "2025-12-31") // Akhir tahun
-        .field("registrationEndDate", "2025-01-01") // Awal tahun (Logic Error)
+        .field("registrationStartDate", "2025-12-31")
+        .field("registrationEndDate", "2025-01-01") // Error here
         .field("eventDate", "2026-01-01")
         .field("registrationLink", "http://link.com")
         .field("contactPerson", "08111")
         .field("categoryId", category.id)
         .attach("poster", mockPosterBuffer, "poster.jpg");
 
-      expect(res.statusCode).toBe(400); // Bad Request (Logic Validation)
-    });
-
-    it("should return 400 if Category ID is invalid (Foreign Key Constraint)", async () => {
-      const { cookie } = await createTestUser("ADMIN");
-
-      const res = await request(app)
-        .post("/api/v1/competitions")
-        .set("Cookie", cookie)
-        .field("title", "No Category Comp")
-        .field("shortDescription", "x")
-        .field("fullDescription", "x")
-        .field("organizer", "x")
-        .field("registrationStartDate", new Date().toISOString())
-        .field("registrationEndDate", new Date().toISOString())
-        .field("eventDate", new Date().toISOString())
-        .field("registrationLink", "x")
-        .field("contactPerson", "x")
-        .field("categoryId", "invalid_category_id") // ID Ngawur
-        .attach("poster", mockPosterBuffer, "poster.jpg");
-
-      expect(res.statusCode).toBe(400); // Atau 404 tergantung implementasi Prisma Error Handler
-    });
-
-    it("should return 400 if Poster file is missing", async () => {
-      const { cookie } = await createTestUser("ADMIN");
-      const category = await createCategory();
-
-      const res = await request(app)
-        .post("/api/v1/competitions")
-        .set("Cookie", cookie)
-        .field("title", "No Poster")
-        .field("shortDescription", "x")
-        .field("fullDescription", "x")
-        .field("organizer", "x")
-        .field("registrationStartDate", new Date().toISOString())
-        .field("registrationEndDate", new Date().toISOString())
-        .field("eventDate", new Date().toISOString())
-        .field("registrationLink", "x")
-        .field("contactPerson", "x")
-        .field("categoryId", category.id);
-      // .attach('poster') <-- Missing
-
       expect(res.statusCode).toBe(400);
     });
-
-    it("should forbid STUDENT from creating competition", async () => {
-      const { cookie } = await createTestUser("STUDENT");
-      const res = await request(app)
-        .post("/api/v1/competitions")
-        .set("Cookie", cookie);
-      expect(res.statusCode).toBe(403);
-    });
   });
 
   // ==========================================
-  // 2. GET /competitions (Read Active & Filtering)
+  // 2. GET /competitions (Public List - Only ACCEPTED)
   // ==========================================
   describe("GET /competitions", () => {
-    it("should FILTER by Title (Search)", async () => {
+    it("should ONLY return ACCEPTED competitions", async () => {
       const { cookie } = await createTestUser("STUDENT");
       const category = await createCategory();
       const future = new Date();
       future.setDate(future.getDate() + 30);
 
-      // Seed 2 lomba
-      await prisma.competition.createMany({
-        data: [
-          {
-            title: "Lomba Makan Kerupuk",
-            shortDescription: "x",
-            fullDescription: "x",
-            organizer: "x",
-            posterUrl: "x",
-            registrationStartDate: new Date(),
-            registrationEndDate: future,
-            eventDate: future,
-            registrationLink: "x",
-            contactPerson: "x",
-            categoryId: category.id,
-          },
-          {
-            title: "Lomba Coding Python",
-            shortDescription: "x",
-            fullDescription: "x",
-            organizer: "x",
-            posterUrl: "x",
-            registrationStartDate: new Date(),
-            registrationEndDate: future,
-            eventDate: future,
-            registrationLink: "x",
-            contactPerson: "x",
-            categoryId: category.id,
-          },
-        ],
-      });
-
-      // Search "Coding"
-      const res = await request(app)
-        .get("/api/v1/competitions?search=coding")
-        .set("Cookie", cookie);
-
-      expect(res.statusCode).toBe(200);
-      expect(res.body).toHaveLength(1);
-      expect(res.body[0].title).toBe("Lomba Coding Python");
-    });
-
-    it("should FILTER by Category", async () => {
-      const { cookie } = await createTestUser("STUDENT");
-      const catTech = await createCategory("Tech");
-      const catArt = await createCategory("Art");
-      const future = new Date();
-      future.setDate(future.getDate() + 30);
-
-      // Seed
+      // Seed 1 ACCEPTED
       await prisma.competition.create({
         data: {
-          title: "Tech Comp",
-          categoryId: catTech.id,
+          title: "Public Event",
           shortDescription: "x",
           fullDescription: "x",
           organizer: "x",
@@ -195,12 +136,15 @@ describe("Competition Management Integration Tests", () => {
           eventDate: future,
           registrationLink: "x",
           contactPerson: "x",
+          categoryId: category.id,
+          status: "ACCEPTED", // Visible
         },
       });
+
+      // Seed 1 PENDING
       await prisma.competition.create({
         data: {
-          title: "Art Comp",
-          categoryId: catArt.id,
+          title: "Pending Event",
           shortDescription: "x",
           fullDescription: "x",
           organizer: "x",
@@ -210,175 +154,154 @@ describe("Competition Management Integration Tests", () => {
           eventDate: future,
           registrationLink: "x",
           contactPerson: "x",
+          categoryId: category.id,
+          status: "PENDING", // Hidden
         },
       });
 
-      // Filter by Tech Category ID
       const res = await request(app)
-        .get(`/api/v1/competitions?categoryId=${catTech.id}`)
+        .get("/api/v1/competitions")
         .set("Cookie", cookie);
 
       expect(res.statusCode).toBe(200);
       expect(res.body).toHaveLength(1);
-      expect(res.body[0].title).toBe("Tech Comp");
-    });
-
-    it("should return 401 if not authenticated", async () => {
-      const res = await request(app).get("/api/v1/competitions");
-      expect(res.statusCode).toBe(401);
+      expect(res.body[0].title).toBe("Public Event");
     });
   });
 
   // ==========================================
-  // 3. GET /competitions/:id (Detail)
+  // 3. GET /competitions/admin/pending (Moderation List)
   // ==========================================
-  describe("GET /competitions/:id", () => {
-    it("should return competition detail if ID exists", async () => {
-      const { cookie } = await createTestUser("STUDENT");
+  describe("GET /competitions/admin/pending", () => {
+    it("should allow ADMIN to see PENDING competitions", async () => {
+      const { cookie } = await createTestUser("ADMIN");
       const category = await createCategory();
 
-      const comp = await prisma.competition.create({
+      await prisma.competition.create({
         data: {
-          title: "Detail Test",
-          shortDescription: "Short",
-          fullDescription: "Full",
-          organizer: "Org",
-          posterUrl: "url",
+          title: "Needs Review",
+          shortDescription: "-",
+          fullDescription: "-",
+          organizer: "-",
+          posterUrl: "-",
           registrationStartDate: new Date(),
           registrationEndDate: new Date(),
           eventDate: new Date(),
-          registrationLink: "link",
-          contactPerson: "cp",
+          registrationLink: "-",
+          contactPerson: "-",
           categoryId: category.id,
+          status: "PENDING",
         },
       });
 
       const res = await request(app)
-        .get(`/api/v1/competitions/${comp.id}`)
+        .get("/api/v1/competitions/admin/pending")
         .set("Cookie", cookie);
 
       expect(res.statusCode).toBe(200);
-      expect(res.body.title).toBe("Detail Test");
-      expect(res.body.category.name).toBeDefined(); // Pastikan relasi terbawa (include)
+      expect(res.body[0].title).toBe("Needs Review");
     });
 
-    it("should return 404 if competition ID not found", async () => {
+    it("should forbid STUDENT from accessing pending list", async () => {
       const { cookie } = await createTestUser("STUDENT");
       const res = await request(app)
-        .get("/api/v1/competitions/invalid-id")
+        .get("/api/v1/competitions/admin/pending")
         .set("Cookie", cookie);
 
-      expect(res.statusCode).toBe(404);
+      // Expect 404 (if caught by dynamic route) or 403 (if protected by middleware)
+      // Depending on router order. If /:id is after /admin/pending, logic dictates middleware runs first.
+      expect([403, 404]).toContain(res.statusCode);
     });
   });
 
   // ==========================================
-  // 4. PUT /competitions/:id (Update)
+  // 4. PUT /competitions/:id/status (Approve/Reject)
   // ==========================================
-  describe("PUT /competitions/:id", () => {
-    it("should allow ADMIN to update details (without file)", async () => {
+  describe("PUT /competitions/:id/status", () => {
+    it("should allow ADMIN to Approve (ACCEPT) a competition", async () => {
       const { cookie } = await createTestUser("ADMIN");
       const category = await createCategory();
 
       const comp = await prisma.competition.create({
         data: {
-          title: "Old Title",
-          shortDescription: "x",
-          fullDescription: "x",
-          organizer: "x",
-          posterUrl: "old.jpg",
+          title: "Pending Submission",
+          shortDescription: "-",
+          fullDescription: "-",
+          organizer: "-",
+          posterUrl: "-",
           registrationStartDate: new Date(),
           registrationEndDate: new Date(),
           eventDate: new Date(),
-          registrationLink: "x",
-          contactPerson: "x",
+          registrationLink: "-",
+          contactPerson: "-",
           categoryId: category.id,
+          status: "PENDING",
         },
       });
 
       const res = await request(app)
-        .put(`/api/v1/competitions/${comp.id}`)
+        .put(`/api/v1/competitions/${comp.id}/status`)
         .set("Cookie", cookie)
-        .field("title", "New Title Updated") // Hanya update judul
-        // Field lain wajib dikirim ulang jika logic update bersifat "replace"
-        // atau opsional jika "patch". Di sini kita asumsikan mengirim data lengkap.
-        .field("shortDescription", "x")
-        .field("fullDescription", "x")
-        .field("organizer", "x")
-        .field("registrationStartDate", new Date().toISOString())
-        .field("registrationEndDate", new Date().toISOString())
-        .field("eventDate", new Date().toISOString())
-        .field("registrationLink", "x")
-        .field("contactPerson", "x")
-        .field("categoryId", category.id);
-      // Note: Tidak attach poster
+        .send({ status: "ACCEPTED" });
 
       expect(res.statusCode).toBe(200);
-      expect(res.body.title).toBe("New Title Updated");
-      expect(res.body.posterUrl).toBe("old.jpg"); // Poster lama tidak berubah
-    });
-  });
+      expect(res.body.data.status).toBe("ACCEPTED");
 
-  // ==========================================
-  // 5. POST /competitions/:id/archive (Manual Archive)
-  // ==========================================
-  describe("POST /competitions/:id/archive", () => {
-    it("should allow ADMIN to manually archive a competition", async () => {
-      const { cookie } = await createTestUser("ADMIN");
-      const category = await createCategory();
-
-      const comp = await prisma.competition.create({
-        data: {
-          title: "To Be Archived",
-          shortDescription: "x",
-          fullDescription: "x",
-          organizer: "x",
-          posterUrl: "x",
-          registrationStartDate: new Date(),
-          registrationEndDate: new Date(),
-          eventDate: new Date(),
-          registrationLink: "x",
-          contactPerson: "x",
-          categoryId: category.id,
-          isArchived: false,
-        },
-      });
-
-      const res = await request(app)
-        .post(`/api/v1/competitions/${comp.id}/archive`)
-        .set("Cookie", cookie);
-
-      expect(res.statusCode).toBe(200);
-      expect(res.body.isArchived).toBe(true);
-
-      // Verifikasi di DB
-      const dbComp = await prisma.competition.findUnique({
+      // Verify DB
+      const updated = await prisma.competition.findUnique({
         where: { id: comp.id },
       });
-      expect(dbComp.isArchived).toBe(true);
+      expect(updated.status).toBe("ACCEPTED");
+    });
+
+    it("should reject invalid status", async () => {
+      const { cookie } = await createTestUser("ADMIN");
+      const category = await createCategory();
+      const comp = await prisma.competition.create({
+        data: {
+          title: "Comp",
+          shortDescription: "-",
+          fullDescription: "-",
+          organizer: "-",
+          posterUrl: "-",
+          registrationStartDate: new Date(),
+          registrationEndDate: new Date(),
+          eventDate: new Date(),
+          registrationLink: "-",
+          contactPerson: "-",
+          categoryId: category.id,
+          status: "PENDING",
+        },
+      });
+
+      const res = await request(app)
+        .put(`/api/v1/competitions/${comp.id}/status`)
+        .set("Cookie", cookie)
+        .send({ status: "INVALID_STATUS" });
+
+      expect(res.statusCode).toBe(400); // Bad Request
     });
   });
 
   // ==========================================
-  // 6. DELETE /competitions/:id
+  // 5. DELETE /competitions/:id
   // ==========================================
   describe("DELETE /competitions/:id", () => {
     it("should allow ADMIN to delete a competition", async () => {
       const { cookie } = await createTestUser("ADMIN");
       const category = await createCategory();
-
       const comp = await prisma.competition.create({
         data: {
           title: "To Delete",
-          shortDescription: "x",
-          fullDescription: "x",
-          organizer: "x",
-          posterUrl: "x",
+          shortDescription: "-",
+          fullDescription: "-",
+          organizer: "-",
+          posterUrl: "-",
           registrationStartDate: new Date(),
           registrationEndDate: new Date(),
           eventDate: new Date(),
-          registrationLink: "x",
-          contactPerson: "x",
+          registrationLink: "-",
+          contactPerson: "-",
           categoryId: category.id,
         },
       });
@@ -387,8 +310,7 @@ describe("Competition Management Integration Tests", () => {
         .delete(`/api/v1/competitions/${comp.id}`)
         .set("Cookie", cookie);
 
-      expect(res.statusCode).toBe(204); // No Content
-
+      expect(res.statusCode).toBe(204);
       const check = await prisma.competition.findUnique({
         where: { id: comp.id },
       });

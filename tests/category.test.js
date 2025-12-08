@@ -183,41 +183,58 @@ describe("Category Management Integration Tests", () => {
     });
 
     it("should CASCADE delete related competitions when category is deleted", async () => {
+      // 1. Setup: Login sebagai Admin (karena hanya admin yang boleh hapus kategori)
       const { cookie } = await createTestUser("ADMIN");
 
-      // 1. Setup: Kategori + Lomba
+      // 2. Setup: Buat Dummy Kategori
       const category = await prisma.category.create({
-        data: { name: "Parent Category" },
+        data: { name: "Category To Delete" },
       });
 
+      // 3. Setup: Buat Dummy Lomba yang terhubung ke Kategori tersebut
+      // PERBAIKAN: Isi field wajib & pastikan logika tanggal benar (Start < End < Event)
       const competition = await prisma.competition.create({
         data: {
           title: "Child Competition",
-          shortDescription: "-",
-          fullDescription: "-",
-          organizer: "-",
-          posterUrl: "-",
+          shortDescription: "Short desc",
+          fullDescription: "Full description content",
+          organizer: "Himpunan Mahasiswa",
+          posterUrl: "/uploads/test-poster.jpg",
+
+          // Logika Tanggal: Gunakan waktu masa depan agar valid
           registrationStartDate: new Date(),
-          registrationEndDate: new Date(),
-          eventDate: new Date(),
-          registrationLink: "-",
-          contactPerson: "-",
-          categoryId: category.id, // Relasi
+          registrationEndDate: new Date(Date.now() + 86400000), // +1 Hari
+          eventDate: new Date(Date.now() + 172800000), // +2 Hari
+
+          registrationLink: "https://example.com",
+          contactPerson: "08123456789",
+          categoryId: category.id, // Relasi ke parent
+
+          // [FITUR BARU] Field Status
+          // Walaupun defaultnya PENDING, kita set explicit agar jelas
+          status: "PENDING",
+
+          // [FITUR BARU] Author (Optional/Nullable di schema)
+          // Kita biarkan null atau bisa diisi jika tes memerlukan relasi user
+          authorId: null,
         },
       });
 
-      // 2. Delete Category
-      const res = await request(app)
+      // 4. Action: Request DELETE ke endpoint kategori
+      const response = await request(app) // Pastikan 'request' & 'app' sudah di-import dari supertest
         .delete(`/api/v1/categories/${category.id}`)
         .set("Cookie", cookie);
 
-      expect(res.statusCode).toBe(204);
+      // 5. Assertion: Pastikan response sukses (204 No Content)
+      expect(response.status).toBe(204);
 
-      // 3. Verifikasi Lomba IKUT Terhapus
-      const checkComp = await prisma.competition.findUnique({
+      // 6. Verifikasi Database: Cek apakah lomba IKUT terhapus
+      const deletedCompetition = await prisma.competition.findUnique({
         where: { id: competition.id },
       });
-      expect(checkComp).toBeNull(); // Harus null karena cascade
+
+      // Ekspektasi: Lomba harus null (hilang) karena efek Cascade
+      expect(deletedCompetition).toBeNull();
     });
 
     it("should return 404 when deleting non-existent category", async () => {
